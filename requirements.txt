@@ -1,24 +1,8 @@
-# Streamlit UI
 streamlit==1.25.0
-
-# Database
-sqlite3  # Built-in in Python, install separately nahi karna
-
-# Password hashing
-hashlib  # Built-in in Python
-
-# Date and time
-datetime  # Built-in in Python
-
-# Optional: For AI solution in future
 openai==1.0.0
 transformers==5.5.1
 torch==2.3.0
-
-# Optional: Notifications, news alerts
 requests==2.31.0
 beautifulsoup4==4.12.2
 lxml==4.9.3
-
-# Environment variables (optional)
 python-dotenv==1.0.0
