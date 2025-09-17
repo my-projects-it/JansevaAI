@@ -1,124 +1,137 @@
-# app.py
 import streamlit as st
-from datetime import datetime, timedelta
-import pandas as pd
-import requests
-import uuid
+import sqlite3
+from hashlib import sha256
+from datetime import datetime
 
-# ------------------------------
-# Hugging Face Free AI Model
-# ------------------------------
-HF_API_URL = "https://api-inference.huggingface.co/models/bigscience/bloom-560m"
-HF_API_TOKEN = st.secrets.get("HF_API_TOKEN", "")
+# -------------------- DATABASE SETUP --------------------
+conn = sqlite3.connect('janseva.db', check_same_thread=False)
+c = conn.cursor()
 
-headers = {"Authorization": f"Bearer {HF_API_TOKEN}"} if HF_API_TOKEN else {}
+# Users table
+c.execute('''CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE,
+            password TEXT,
+            role TEXT,
+            email TEXT)''')
 
-def get_ai_solution(problem_text):
-    if not HF_API_TOKEN:
-        return "Demo AI Solution: Please add HF_API_TOKEN in Streamlit Secrets for full AI suggestions."
-    payload = {"inputs": problem_text, "parameters": {"max_new_tokens": 100}}
-    try:
-        response = requests.post(HF_API_URL, headers=headers, json=payload, timeout=15)
-        if response.status_code == 200:
-            return response.json()[0]['generated_text']
-        else:
-            return f"AI API Error: {response.status_code}"
-    except Exception as e:
-        return f"AI API Exception: {str(e)}"
+# Problems table
+c.execute('''CREATE TABLE IF NOT EXISTS problems (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            title TEXT,
+            description TEXT,
+            category TEXT,
+            status TEXT,
+            created_at TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(id))''')
 
-# ------------------------------
-# Session State / Data Storage
-# ------------------------------
-if "problems" not in st.session_state:
-    st.session_state.problems = []  # List of dicts: id, text, location, category, submission_time, solutions
+# Solutions table
+c.execute('''CREATE TABLE IF NOT EXISTS solutions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            problem_id INTEGER,
+            user_id INTEGER,
+            solution TEXT,
+            created_at TEXT,
+            FOREIGN KEY(problem_id) REFERENCES problems(id),
+            FOREIGN KEY(user_id) REFERENCES users(id))''')
+conn.commit()
 
-# ------------------------------
-# App Title
-# ------------------------------
-st.set_page_config(page_title="Citizen Problem Solver", layout="wide")
-st.title("🛠️ Citizen Problem & Solution Tracker")
-st.markdown("Submit problems, suggest solutions, vote, and track status with AI assistance!")
+# -------------------- HELPER FUNCTIONS --------------------
+def hash_password(password):
+    return sha256(password.encode()).hexdigest()
 
-# ------------------------------
-# Sidebar Navigation
-# ------------------------------
-menu = st.sidebar.selectbox("Menu", ["Submit Problem", "View Problems", "Hackathon / Leaderboard"])
 
-# ------------------------------
-# Submit Problem
-# ------------------------------
-if menu == "Submit Problem":
-    st.header("Submit a Problem")
-    problem_text = st.text_area("Describe your problem", "")
-    category = st.selectbox("Category", ["Health", "Infrastructure", "Education", "Environment", "Other"])
-    location = st.text_input("Location / City", "")
-    
-    if st.button("Submit Problem"):
-        if problem_text and location:
-            problem_id = str(uuid.uuid4())
-            st.session_state.problems.append({
-                "id": problem_id,
-                "text": problem_text,
-                "category": category,
-                "location": location,
-                "submission_time": datetime.now(),
-                "solutions": [],  # each solution: dict: author, text, ai_generated, votes
-                "deadline": datetime.now() + timedelta(days=7)  # internal alert simulation
-            })
-            st.success("Problem submitted successfully!")
+def verify_user(username, password):
+    c.execute('SELECT password FROM users WHERE username=?', (username,))
+    data = c.fetchone()
+    if data and data[0] == hash_password(password):
+        return True
+    return False
 
-# ------------------------------
-# View Problems
-# ------------------------------
-elif menu == "View Problems":
-    st.header("All Problems & Solutions")
-    if not st.session_state.problems:
-        st.info("No problems submitted yet.")
-    else:
-        for p in st.session_state.problems[::-1]:
-            st.subheader(f"{p['text']} ({p['category']}, {p['location']})")
-            st.caption(f"Submitted on: {p['submission_time'].strftime('%Y-%m-%d %H:%M:%S')} | Deadline: {p['deadline'].strftime('%Y-%m-%d')}")
-            
-            # AI Suggestion Button
-            if st.button(f"AI Suggest Solution for {p['id']}", key=f"ai_{p['id']}"):
-                ai_sol = get_ai_solution(p['text'])
-                p['solutions'].append({"author": "AI", "text": ai_sol, "ai_generated": True, "votes": 0})
-                st.success("AI solution added!")
+# -------------------- AUTHENTICATION --------------------
+st.title('Janseva App - Citizens Problem Solving Platform')
 
-            # Add User Solution
-            with st.expander("Add Solution"):
-                user_sol = st.text_area(f"Your Solution for {p['id']}", key=f"user_{p['id']}")
-                if st.button(f"Submit Solution {p['id']}", key=f"submit_{p['id']}"):
-                    if user_sol:
-                        p['solutions'].append({"author": "User", "text": user_sol, "ai_generated": False, "votes": 0})
-                        st.success("Solution added!")
+menu = ['Home', 'Login', 'Signup']
+choice = st.sidebar.selectbox('Menu', menu)
 
-            # Show Solutions
-            if p['solutions']:
-                st.markdown("**Solutions:**")
-                for idx, s in enumerate(p['solutions']):
-                    st.write(f"- {s['text']} (by {s['author']}) | Votes: {s['votes']}")
-                    if st.button(f"Vote {p['id']}_{idx}", key=f"vote_{p['id']}_{idx}"):
-                        s['votes'] += 1
-                        st.success("Voted successfully!")
+if choice == 'Home':
+    st.subheader('Welcome to Janseva App')
+    st.write('Track problems, submit solutions, get updates, and help your community.')
 
-# ------------------------------
-# Hackathon / Leaderboard
-# ------------------------------
-elif menu == "Hackathon / Leaderboard":
-    st.header("Hackathon & Leaderboard")
-    # Collect all solutions across problems
-    all_solutions = []
-    for p in st.session_state.problems:
-        for s in p['solutions']:
-            all_solutions.append({
-                "problem": p['text'],
-                "solution": s['text'],
-                "author": s['author'],
-                "votes": s['votes']
-            })
-    if not all_solutions:
-        st.info("No solutions yet!")
-    else:
-        df = pd.DataFrame(all_solutions)
-        st.dataframe(df.sort_values(by="votes", ascending=False))
+elif choice == 'Signup':
+    st.subheader('Create New Account')
+    username = st.text_input('Username')
+    email = st.text_input('Email')
+    password = st.text_input('Password', type='password')
+    role = st.selectbox('Role', ['Citizen','Neta','Adhikari'])
+
+    if st.button('Signup'):
+        try:
+            c.execute('INSERT INTO users (username, password, role, email) VALUES (?,?,?,?)',
+                      (username, hash_password(password), role, email))
+            conn.commit()
+            st.success('Account created successfully! Please login.')
+        except sqlite3.IntegrityError:
+            st.error('Username already exists')
+
+elif choice == 'Login':
+    st.subheader('Login')
+    username = st.text_input('Username')
+    password = st.text_input('Password', type='password')
+
+    if st.button('Login'):
+        if verify_user(username, password):
+            st.success(f'Logged in as {username}')
+            c.execute('SELECT id, role FROM users WHERE username=?', (username,))
+            user_id, role = c.fetchone()
+
+            # -------------------- DASHBOARD --------------------
+            st.subheader('Dashboard')
+            if role == 'Citizen':
+                st.write('Submit a Problem')
+                title = st.text_input('Title')
+                description = st.text_area('Description')
+                category = st.selectbox('Category',['Women & Children','Health','Education','Infrastructure','Other'])
+                if st.button('Submit Problem'):
+                    c.execute('INSERT INTO problems (user_id, title, description, category, status, created_at) VALUES (?,?,?,?,?,?)',
+                              (user_id, title, description, category, 'Pending', datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                    conn.commit()
+                    st.success('Problem submitted successfully!')
+
+                st.write('Your Submitted Problems')
+                c.execute('SELECT id, title, description, category, status, created_at FROM problems WHERE user_id=?', (user_id,))
+                data = c.fetchall()
+                for d in data:
+                    st.info(f"{d[1]} - {d[4]} ({d[3]})\n{d[2]}\nSubmitted on: {d[5]}")
+                    c.execute('SELECT solution, created_at FROM solutions WHERE problem_id=?', (d[0],))
+                    solutions = c.fetchall()
+                    for s in solutions:
+                        st.success(f"Solution: {s[0]}\nAdded on: {s[1]}")
+
+            elif role in ['Neta','Adhikari']:
+                st.write('View & Solve Problems')
+                c.execute('SELECT p.id, u.username, p.title, p.description, p.category, p.status FROM problems p JOIN users u ON p.user_id=u.id')
+                problems = c.fetchall()
+                for p_id, uname, title, desc, cat, status in problems:
+                    st.info(f"Problem by {uname}: {title} ({status})\nCategory: {cat}\n{desc}")
+                    solution = st.text_area(f'Solution for {title}', key=p_id)
+                    if st.button(f'Submit Solution {p_id}') and solution:
+                        c.execute('INSERT INTO solutions (problem_id, user_id, solution, created_at) VALUES (?,?,?,?)',
+                                  (p_id, user_id, solution, datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+                        c.execute('UPDATE problems SET status=? WHERE id=?', ('Solved', p_id))
+                        conn.commit()
+                        st.success('Solution submitted and status updated!')
+
+            elif role == 'Admin':
+                st.write('Admin Panel: All Users & Problems')
+                c.execute('SELECT username, role, email FROM users')
+                users = c.fetchall()
+                st.write('Users:')
+                for u in users:
+                    st.write(u)
+                c.execute('SELECT p.title, u.username, p.status FROM problems p JOIN users u ON p.user_id=u.id')
+                probs = c.fetchall()
+                st.write('Problems:')
+                for p in probs:
+                    st.write(p)
