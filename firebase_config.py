@@ -22,4 +22,5 @@ def validate_user(email, password):
             return True
     return False
 
-def save_feedback(user_email)
+def save_feedback(user_email, message):
+    feedback_sheet.append_row([user_email, message])
