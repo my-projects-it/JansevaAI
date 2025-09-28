@@ -1,91 +1,82 @@
 import streamlit as st
 import pandas as pd
 import os
+from datetime import datetime
+from firebase_config import save_user, validate_user, save_feedback
 
-# ==========================
-# CSV Helper Functions
-# ==========================
+st.set_page_config(page_title="JanSevaAI", page_icon="🤖", layout="wide")
 
-USERS_FILE = "users.csv"
+DATA_FILE = "users.csv"
 FEEDBACK_FILE = "feedback.csv"
 
+# -------- Helper Functions --------
 def load_users():
-    if os.path.exists(USERS_FILE):
-        return pd.read_csv(USERS_FILE)
-    return pd.DataFrame(columns=["name", "email", "password"])
+    if os.path.exists(DATA_FILE):
+        return pd.read_csv(DATA_FILE)
+    return pd.DataFrame(columns=["username", "password"])
 
-def save_user(name, email, password):
-    df = load_users()
-    # Check duplicate email
-    if email in df["email"].values:
-        return False
-    new_user = pd.DataFrame([[name, email, password]], columns=df.columns)
-    df = pd.concat([df, new_user], ignore_index=True)
-    df.to_csv(USERS_FILE, index=False)
-    return True
-
-def validate_user(email, password):
-    df = load_users()
-    user = df[(df["email"] == email) & (df["password"] == password)]
-    return not user.empty
-
-def save_feedback(name, feedback):
-    df = pd.DataFrame([[name, feedback]], columns=["name", "feedback"])
-    if os.path.exists(FEEDBACK_FILE):
-        old = pd.read_csv(FEEDBACK_FILE)
-        df = pd.concat([old, df], ignore_index=True)
-    df.to_csv(FEEDBACK_FILE, index=False)
+def save_users(df):
+    df.to_csv(DATA_FILE, index=False)
 
 def load_feedback():
     if os.path.exists(FEEDBACK_FILE):
         return pd.read_csv(FEEDBACK_FILE)
-    return pd.DataFrame(columns=["name", "feedback"])
+    return pd.DataFrame(columns=["username", "feedback", "timestamp"])
 
+def save_feedback_local(username, feedback):
+    df = load_feedback()
+    new_row = {"username": username, "feedback": feedback, "timestamp": datetime.now()}
+    df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+    df.to_csv(FEEDBACK_FILE, index=False)
 
-# ==========================
-# Streamlit App
-# ==========================
+# --------- Login / Signup ---------
+st.title("🇮🇳 JanSevaAI – Citizen Help Platform")
 
-st.title("🛡️ JansevaAI - Secure Citizen App")
+menu = st.sidebar.radio("Navigation", ["Login", "Sign Up", "Dashboard"])
 
-menu = ["Signup", "Login", "Feedback", "View Feedback"]
-choice = st.sidebar.selectbox("Menu", menu)
-
-if choice == "Signup":
-    st.subheader("Create a New Account")
-    name = st.text_input("Full Name")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-
-    if st.button("Signup"):
-        if save_user(name, email, password):
-            st.success("Signup successful! You can now login.")
+if menu == "Sign Up":
+    st.subheader("Create Your Account")
+    username = st.text_input("Choose Username")
+    password = st.text_input("Choose Password", type="password")
+    if st.button("Sign Up"):
+        df = load_users()
+        if username in df['username'].values:
+            st.error("❌ Username already exists!")
         else:
-            st.error("Email already exists. Please login.")
+            new_user = pd.DataFrame({"username": [username], "password": [password]})
+            df = pd.concat([df, new_user], ignore_index=True)
+            save_users(df)
+            st.success("✅ Account created! Go to Login page.")
 
-elif choice == "Login":
-    st.subheader("Login to Your Account")
-    email = st.text_input("Email")
+elif menu == "Login":
+    st.subheader("Login to Continue")
+    username = st.text_input("Username")
     password = st.text_input("Password", type="password")
-
     if st.button("Login"):
-        if validate_user(email, password):
-            st.success(f"Welcome back, {email}!")
+        df = load_users()
+        user = df[(df['username'] == username) & (df['password'] == password)]
+        if not user.empty:
+            st.session_state["logged_in"] = True
+            st.session_state["username"] = username
+            st.success("✅ Logged in successfully!")
         else:
-            st.error("Invalid email or password")
+            st.error("❌ Invalid credentials")
 
-elif choice == "Feedback":
-    st.subheader("Give Your Feedback")
-    name = st.text_input("Your Name")
-    feedback = st.text_area("Your Feedback")
-    if st.button("Submit Feedback"):
-        save_feedback(name, feedback)
-        st.success("Thank you for your feedback!")
+if menu == "Dashboard":
+    if st.session_state.get("logged_in", False):
+        st.success(f"Welcome, {st.session_state['username']}! 🎉")
+        st.write("Use this space to report problems, give feedback, and help improve society.")
 
-elif choice == "View Feedback":
-    st.subheader("📊 User Feedback")
-    feedback_data = load_feedback()
-    if not feedback_data.empty:
-        st.dataframe(feedback_data)
+        feedback = st.text_area("Share your feedback or idea 💡")
+        if st.button("Submit Feedback"):
+            save_feedback_local(st.session_state['username'], feedback)
+            st.success("✅ Your feedback has been saved!")
+        
+        st.subheader("Community Feedback")
+        df = load_feedback()
+        if not df.empty:
+            st.dataframe(df)
+        else:
+            st.info("No feedback yet.")
     else:
-        st.info("No feedback submitted yet.")
+        st.warning("⚠ Please login to access Dashboard.")
