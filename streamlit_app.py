@@ -1,79 +1,91 @@
 import streamlit as st
-from firebase_config import save_user, validate_user, save_feedback
-from chatbot import ask_ai
-from alerts import get_govt_alerts
-from utils import show_feedback_analytics
+import pandas as pd
+import os
 
-st.set_page_config(page_title="Citizen Help Platform", layout="wide", page_icon="🌐")
+# ==========================
+# CSV Helper Functions
+# ==========================
 
-# ----- Sidebar: Login / Signup -----
-st.sidebar.title("👤 Account")
-choice = st.sidebar.selectbox("Choose Option", ["Login", "Signup"])
+USERS_FILE = "users.csv"
+FEEDBACK_FILE = "feedback.csv"
+
+def load_users():
+    if os.path.exists(USERS_FILE):
+        return pd.read_csv(USERS_FILE)
+    return pd.DataFrame(columns=["name", "email", "password"])
+
+def save_user(name, email, password):
+    df = load_users()
+    # Check duplicate email
+    if email in df["email"].values:
+        return False
+    new_user = pd.DataFrame([[name, email, password]], columns=df.columns)
+    df = pd.concat([df, new_user], ignore_index=True)
+    df.to_csv(USERS_FILE, index=False)
+    return True
+
+def validate_user(email, password):
+    df = load_users()
+    user = df[(df["email"] == email) & (df["password"] == password)]
+    return not user.empty
+
+def save_feedback(name, feedback):
+    df = pd.DataFrame([[name, feedback]], columns=["name", "feedback"])
+    if os.path.exists(FEEDBACK_FILE):
+        old = pd.read_csv(FEEDBACK_FILE)
+        df = pd.concat([old, df], ignore_index=True)
+    df.to_csv(FEEDBACK_FILE, index=False)
+
+def load_feedback():
+    if os.path.exists(FEEDBACK_FILE):
+        return pd.read_csv(FEEDBACK_FILE)
+    return pd.DataFrame(columns=["name", "feedback"])
+
+
+# ==========================
+# Streamlit App
+# ==========================
+
+st.title("🛡️ JansevaAI - Secure Citizen App")
+
+menu = ["Signup", "Login", "Feedback", "View Feedback"]
+choice = st.sidebar.selectbox("Menu", menu)
 
 if choice == "Signup":
-    email = st.sidebar.text_input("Email")
-    password = st.sidebar.text_input("Password", type="password")
-    if st.sidebar.button("Sign Up"):
-        save_user(email, password)
-        st.sidebar.success("✅ Account Created! Please Login.")
+    st.subheader("Create a New Account")
+    name = st.text_input("Full Name")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Signup"):
+        if save_user(name, email, password):
+            st.success("Signup successful! You can now login.")
+        else:
+            st.error("Email already exists. Please login.")
 
 elif choice == "Login":
-    email = st.sidebar.text_input("Email")
-    password = st.sidebar.text_input("Password", type="password")
-    if st.sidebar.button("Login"):
+    st.subheader("Login to Your Account")
+    email = st.text_input("Email")
+    password = st.text_input("Password", type="password")
+
+    if st.button("Login"):
         if validate_user(email, password):
-            st.session_state["user"] = email
-            st.sidebar.success(f"Welcome, {email}!")
+            st.success(f"Welcome back, {email}!")
         else:
-            st.sidebar.error("❌ Invalid Credentials!")
+            st.error("Invalid email or password")
 
-# ----- Main App -----
-if "user" in st.session_state:
-    st.markdown("<h1 style='text-align:center;color:#4B8BBE;'>🌐 Citizen Help Platform</h1>", unsafe_allow_html=True)
-    st.markdown("---")
+elif choice == "Feedback":
+    st.subheader("Give Your Feedback")
+    name = st.text_input("Your Name")
+    feedback = st.text_area("Your Feedback")
+    if st.button("Submit Feedback"):
+        save_feedback(name, feedback)
+        st.success("Thank you for your feedback!")
 
-    # Tabbed Interface (Tirana-style)
-    tabs = st.tabs(["📢 Alerts", "🤖 Ask AI", "📚 Resources", "✉️ Feedback", "📊 Analytics"])
-
-    # --- Alerts Tab ---
-    with tabs[0]:
-        st.subheader("📢 Latest Alerts")
-        alerts = get_govt_alerts()
-        for alert in alerts:
-            st.info(alert)
-
-    # --- AI Chatbot Tab ---
-    with tabs[1]:
-        st.subheader("🤖 Ask AI")
-        question = st.text_input("Type your question here and hit Ask:")
-        if st.button("Ask AI"):
-            if question:
-                answer = ask_ai(question)
-                st.success(answer)
-
-    # --- Resources Tab ---
-    with tabs[2]:
-        st.subheader("📚 Resources & Help")
-        st.markdown("- [Scholarships & Education](#)")
-        st.markdown("- [Jobs & Skill Training](#)")
-        st.markdown("- [Legal & Safety Guides](#)")
-        st.markdown("- [Health & Awareness](#)")
-
-    # --- Feedback Tab ---
-    with tabs[3]:
-        st.subheader("✉️ Feedback / Report Issue")
-        feedback_msg = st.text_area("Type your message:")
-        if st.button("Submit Feedback"):
-            if feedback_msg:
-                save_feedback(st.session_state["user"], feedback_msg)
-                st.success("✅ Feedback Submitted!")
-
-    # --- Analytics Tab (Admin Only) ---
-    if st.session_state["user"] == "admin@domain.com":
-        with tabs[4]:
-            st.subheader("📊 Feedback Analytics")
-            fig = show_feedback_analytics()
-            if fig:
-                st.plotly_chart(fig)
-            else:
-                st.info("No feedback yet.")
+elif choice == "View Feedback":
+    st.subheader("📊 User Feedback")
+    feedback_data = load_feedback()
+    if not feedback_data.empty:
+        st.dataframe(feedback_data)
+    else:
+        st.info("No feedback submitted yet.")
